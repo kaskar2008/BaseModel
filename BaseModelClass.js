@@ -38,7 +38,7 @@
 // Desc: getFields now take data from group
 // ***********************************************************************
 
-import { fromDot, pascalize } from './../addons.js'
+import { fromDot, pascalize } from './helpers/addons.js'
 
 export class BaseModel {
 
