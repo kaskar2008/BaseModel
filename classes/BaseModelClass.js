@@ -1,7 +1,7 @@
 /**
- * BaseModel v2.4.5
- * Last update: 15.03.2017
- * 
+ * BaseModel v2.4.8
+ * Last update: 27.07.2017
+ *
  * @author kaskar2008
  */
 
@@ -21,6 +21,12 @@
 //       with value from the field 'Id'
 //       in model 'parent.review.loaded.Ticket'
 // ***********************************************************************
+// Feature: Processor self class source (only properties or getters)
+// Ex:  '&.review.loaded.Ticket.Id as ticket_id'
+// Desc: will send field 'ticket_id'
+//       with value from the field 'Id'
+//       in model 'review.loaded.Ticket' in current class
+// ***********************************************************************
 // Feature: Processor inner object
 // Ex:  'city.id as city_id'
 // Desc: will send field 'city_id'
@@ -37,8 +43,18 @@
 // Ex:  load('group_name', data)
 // Desc: getFields now take data from group
 // ***********************************************************************
+// Feature: Modifiers
+// Ex1:  'name': 'allow:[null].string.length:5'
+// Ex2:  'id': 'allow:[-1].int.count:2'
+// Desc: Modifiers can be used within the proc, but they can break a
+//       call chain and also modify value.
+//       In Ex1. above there are 2 mods: 'allow' and 'length'.
+//       'allow' gets an array as a parameter and
+//       check value for breaking.
+//       'length' get integer and do slice(5)
+// ***********************************************************************
 
-import { fromDot, pascalize } from './helpers/addons.js'
+import { fromDot, pascalize } from './addons.js'
 
 export class BaseModel {
 
@@ -73,12 +89,28 @@ export class BaseModel {
    * @return {Func}
    */
   createProcessorCallie (names) {
-    names = names.split('.')
+    let names_ar = names.split('.')
     return data => {
+      let is_stop = false
       let acc = data
-      names.forEach(func => {
-        acc = this.proceedProcessor(func, acc)
-      })
+      for (let name of names_ar) {
+        // check if there is a modifier
+        if (name.indexOf(`:`) >= 0) {
+          let full_mod = name.split(':')
+          let mod_name = full_mod[0]
+          let mod_params = JSON.parse(full_mod[1])
+          if (this.modifiers[mod_name]) {
+            let mod_result = this.modifiers[mod_name](acc, mod_params)
+            acc = mod_result.value || acc
+            is_stop = mod_result.break || is_stop
+          }
+          if (is_stop) {
+            break
+          }
+        } else {
+          acc = this.proceedProcessor(name, acc)
+        }
+      }
       return acc
     }
   }
@@ -113,11 +145,30 @@ export class BaseModel {
         var proc_name = model[property_name]
         return this.getProcessor(proc_name)
       } else {
-        console.error(`BaseModel::getProcessor() Model ${name} not found`) 
+        console.error(`BaseModel::getProcessor() Model ${name} not found`)
       }
     } else {
       return name
     }
+  }
+
+  /**
+   * Adds one Modifier to the model
+   * @param {Object}
+   * @return {BaseModel}
+   */
+  addModifier (params) {
+    var name = params.name || null
+    var callie = params.proc || null
+    if (!name || !callie) {
+      console.error(`
+        BaseAjax::addModifier()
+        You should specify both name and callback
+      `)
+      return false
+    }
+    this.modifiers[name] = callie
+    return this
   }
 
   /**
@@ -147,6 +198,16 @@ export class BaseModel {
    */
   addFieldProcessorsBulk (processors) {
     this.processors = Object.assign(this.processors || {}, processors)
+    return this
+  }
+
+  /**
+   * Adds Modifiers to the model
+   * @param {Object[]}
+   * @return {BaseModel}
+   */
+  addModifiersBulk (modifiers) {
+    this.modifiers = Object.assign(this.modifiers || {}, modifiers)
     return this
   }
 
@@ -238,7 +299,7 @@ export class BaseModel {
    *           model      Context name
    *           data       Data to send
    * @return {Function}
-   */ 
+   */
   generateQuery (params) {
     var uri = params.uri
     var method = params.method || 'GET'
@@ -247,6 +308,7 @@ export class BaseModel {
     var mode = params.mode
     var headers = params.headers || {}
     var credentials = params.credentials
+    var check = params.check || 'status'
     var result = (goodCallback, badCallback, onEnd, onError) => {
       fetch(uri, {
         headers: new Headers(Object.assign({},headers)),
@@ -261,8 +323,8 @@ export class BaseModel {
           if (onError) onError(response)
           return
         }
-        response.json().then((json) => {
-          if (!json.status) {
+        return response.json().then((json) => {
+          if (!json[check]) {
             if (badCallback) badCallback(json)
           } else {
             goodCallback(json)
@@ -285,13 +347,16 @@ export class BaseModel {
   getFields (context) {
     context = context || this.default_context
     var $this = this
-    if (!this._fields[context] && !Object.keys(this._fields[context] || []).length) {
+    if (!Object.keys(this._fields[context] || []).length) {
       console.error(`
         BaseModel::getFields()
         You have to specify the field names through the
         setFieldsNames() method
       `)
       return {}
+    }
+    if (!this._fields[context]) {
+      return this.loaded[context] || {}
     }
     var result = {}
     Object.keys(this._fields[context])
@@ -309,10 +374,10 @@ export class BaseModel {
           let splitted_keys = keys.split('.')
           property_name = splitted_keys.slice(-1).join('')
           // now we see - it's external
-          if ($this.parent != null && (splitted_keys[0] == '^' || splitted_keys[0].indexOf('@') >= 0)) {
+          if (splitted_keys[0] == '^' || splitted_keys[0] == '&' || splitted_keys[0].indexOf('@') === 0) {
             is_external = true
             var model_path = splitted_keys.slice(1, -1).join('.')
-            if (splitted_keys[0].indexOf('@') >= 0) {
+            if (splitted_keys[0].indexOf('@') === 0) {
               var group_name = splitted_keys[0].replace('@','')
               var cont_group = $this.loaded[group_name] ? $this.loaded[group_name].data : null
               if (!cont_group) {
@@ -320,8 +385,11 @@ export class BaseModel {
               }
               model = fromDot(cont_group, model_path)
             } else
-            if (splitted_keys[0] == '^') {
+            if (splitted_keys[0] == '^' && $this.parent) {
               model = fromDot($this.parent, model_path)
+            } else
+            if (splitted_keys[0] == '&') {
+              model = fromDot($this, model_path)
             }
           }
           if (!model) {
@@ -338,7 +406,7 @@ export class BaseModel {
           }
           field_name = keys[1]
         }
-        
+
         value = is_external ? external_value : model[(group.is_cameled ? pascalize(property_name) : property_name)]
         var proc_names = $this.getProcessor($this._fields[context][el])
         var processors = $this.createProcessorCallie(proc_names)
