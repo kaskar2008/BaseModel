@@ -1,5 +1,5 @@
 /**
- * BaseModel v2.4.8
+ * BaseModel v2.4.9
  * Last update: 27.07.2017
  *
  * @author kaskar2008
@@ -52,6 +52,10 @@
 //       'allow' gets an array as a parameter and
 //       check value for breaking.
 //       'length' get integer and do slice(5)
+// ***********************************************************************
+// Feature: Condition in fields
+// Ex:  'text as content if(&.check1 == true)': 'string.strip:15',
+// Desc: check either send this field or not
 // ***********************************************************************
 
 import { fromDot, pascalize } from './addons.js'
@@ -341,6 +345,54 @@ export class BaseModel {
   }
 
   /**
+   * Get field value from container
+   * @param  {String} container
+   * @param  {String} field
+   * @return {Mixed}
+   */
+  getFieldFromContainer (container, field) {
+    let context_group = this.loaded[container] ? this.loaded[container].data : null
+    if (!context_group) {
+      console.error(`BaseModel::getFieldFromContainer() Group ${container} not found`)
+    }
+    return fromDot(context_group, field)
+  }
+
+  /**
+   * Parse js condition (can use '^', '&' and '@' shortcuts)
+   * @param  {String} expression
+   * @return {Boolean}
+   */
+  parseCondition (expression) {
+    let items = expression.split(' ')
+    for (let i in items) {
+      let splitted_keys = items[i].split('.')
+      if (splitted_keys.length) {
+        let model_path = splitted_keys.slice(1, -1).join('.')
+        let property_name = splitted_keys.slice(-1).join('')
+        // from parent
+        if (splitted_keys[0] == '^') {
+          items[i] = fromDot(this.parent, model_path)[property_name]
+        }
+        // from self class
+        if (splitted_keys[0] == '&') {
+          items[i] = fromDot(this, model_path)[property_name]
+        }
+        // from container
+        if (splitted_keys[0] == '@') {
+          let group_name = splitted_keys[0].replace('@','')
+          items[i] = this.getFieldFromContainer(group_name, model_path)[property_name]
+        }
+      }
+    }
+
+    expression = items.join(' ')
+
+    return Function.apply(null, [].concat('return ' + expression))()
+  }
+
+  /**
+   * Collect all model (context) to a single object
    * @param  {String} context
    * @return {Object}
    */
@@ -368,49 +420,62 @@ export class BaseModel {
         var value = null
         var external_value = null
         var is_external = false
-        // is external:
-        if (el.indexOf('.') >= 0) {
-          let keys = el.split(' ')[0]
-          let splitted_keys = keys.split('.')
-          property_name = splitted_keys.slice(-1).join('')
-          // now we see - it's external
-          if (splitted_keys[0] == '^' || splitted_keys[0] == '&' || splitted_keys[0].indexOf('@') === 0) {
-            is_external = true
-            var model_path = splitted_keys.slice(1, -1).join('.')
-            if (splitted_keys[0].indexOf('@') === 0) {
-              var group_name = splitted_keys[0].replace('@','')
-              var cont_group = $this.loaded[group_name] ? $this.loaded[group_name].data : null
-              if (!cont_group) {
-                console.error(`BaseModel::getFields() Group ${group_name} not found`)
-              }
-              model = fromDot(cont_group, model_path)
-            } else
-            if (splitted_keys[0] == '^' && $this.parent) {
-              model = fromDot($this.parent, model_path)
-            } else
-            if (splitted_keys[0] == '&') {
-              model = fromDot($this, model_path)
-            }
-          }
-          if (!model) {
-            console.error(`BaseModel::getFields() Field ${el} not found`)
-          }
-          external_value = model[property_name]
-          field_name = property_name
-        }
-        // is alias:
-        if (el.indexOf(' as ') >= 0) {
-          let keys = el.split(' as ')
-          if (!is_external) {
-            property_name = keys[0]
-          }
-          field_name = keys[1]
+        
+        // has condition:
+        let condition = el.match(/if\((.+)\)/i)
+        let condition_result = true
+        if (condition && condition.length > 1) {
+          condition_result = $this.parseCondition(condition[1])
         }
 
-        value = is_external ? external_value : model[(group.is_cameled ? pascalize(property_name) : property_name)]
-        var proc_names = $this.getProcessor($this._fields[context][el])
-        var processors = $this.createProcessorCallie(proc_names)
-        result[field_name] = processors ? processors(value) : value
+        // if add this field
+        if (condition_result) {
+          // is external:
+          if (el.indexOf('.') >= 0) {
+            let keys = el.split(' ')[0]
+            let splitted_keys = keys.split('.')
+            property_name = splitted_keys.slice(-1).join('')
+            // now we see - it's external
+            if (splitted_keys[0] == '^' || splitted_keys[0] == '&' || splitted_keys[0].indexOf('@') === 0) {
+              is_external = true
+              var model_path = splitted_keys.slice(1, -1).join('.')
+              // from container
+              if (splitted_keys[0].indexOf('@') === 0) {
+                var group_name = splitted_keys[0].replace('@','')
+                model = $this.getFieldFromContainer(group_name, model_path)
+              } else
+              // from parent
+              if (splitted_keys[0] == '^' && $this.parent) {
+                model = fromDot($this.parent, model_path)
+              } else
+              // from self class
+              if (splitted_keys[0] == '&') {
+                model = fromDot($this, model_path)
+              }
+            }
+            if (!model) {
+              console.error(`BaseModel::getFields() Field ${el} not found`)
+            }
+            external_value = model[property_name]
+            field_name = property_name
+          }
+
+          let el_without_cond = el.replace(/if\((.+)\)/ig, '').trim()
+
+          // is alias:
+          if (el_without_cond.indexOf(' as ') >= 0) {
+            let keys = el_without_cond.split(' as ')
+            if (!is_external) {
+              property_name = keys[0]
+            }
+            field_name = keys[1]
+          }
+
+          value = is_external ? external_value : model[(group.is_cameled ? pascalize(property_name) : property_name)]
+          var proc_names = $this.getProcessor($this._fields[context][el])
+          var processors = $this.createProcessorCallie(proc_names)
+          result[field_name] = processors ? processors(value) : value
+        }
       })
     return result
   }

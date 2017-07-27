@@ -10,7 +10,7 @@ export class PostModel extends BaseModel {
       },
       create: {
         '@user.id as author_id': 'int',
-        'text': 'string.strip:15',
+        'text as content if(&.check1 == true)': 'string.strip:15',
         '&.isSeo as is_seo': 'allow:[null].bool'
       }
     })
@@ -22,6 +22,11 @@ export class PostModel extends BaseModel {
         return { break: params.indexOf(value) >= 0 }
       },
     })
+  }
+
+  get check1 () {
+    // do some logic
+    return this.isSeo == true
   }
 
   get isSeo () {
