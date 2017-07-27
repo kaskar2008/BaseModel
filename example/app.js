@@ -1,24 +1,22 @@
 import { PostModel } from './models/PostModel.js'
 
-const post = new PostModel()
+const app = {}
 
-post.interceptor = (response) => {
-  console.log('interceptor')
-  return true
-}
-
-post.load('user', {
+app.user = {
   id: 25654, // whatever id
   name: 'John Doe' // whatever name
-})
+}
+
+app.post = new PostModel(app)
 
 /**
  * do some stuff here
  */
 
-post.load('create', {
-  text: 'Lorem ipsum dolor sit amet, consectetur adipisicing elit.'
-}).create(
+app.post.load({
+  phone: '555555555',
+  email: 'qwe@qwe.qw'
+}, false).save(
   // good
   (json) => {
     // do stuff
@@ -30,25 +28,14 @@ post.load('create', {
     // do stuff
     console.log('bad')
   },
-
-  // end
-  (json) => {
-    // do stuff
-    console.log('end')
-  },
-
-  // error
-  (json) => {
-    // do stuff
-    console.log('error')
-  }
 )
 
 /**
  * Will send:
  * {
- *   author_id: 25654
- *   is_seo: true
- *   text: "Lorem ipsum dol"
+ *   "id": 25654,
+ *   "phone": "555555555",
+ *   "author": "John Doe",
+ *   "email": "qwe@qwe.qw"
  * }
  */
