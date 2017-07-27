@@ -2,6 +2,11 @@ import { PostModel } from './models/PostModel.js'
 
 const post = new PostModel()
 
+post.interceptor = (response) => {
+  console.log('interceptor')
+  return true
+}
+
 post.load('user', {
   id: 25654, // whatever id
   name: 'John Doe' // whatever name
@@ -24,6 +29,18 @@ post.load('create', {
   (json) => {
     // do stuff
     console.log('bad')
+  },
+
+  // end
+  (json) => {
+    // do stuff
+    console.log('end')
+  },
+
+  // error
+  (json) => {
+    // do stuff
+    console.log('error')
   }
 )
 
