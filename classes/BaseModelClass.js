@@ -1,5 +1,5 @@
 /**
- * BaseModel v2.4.9
+ * BaseModel v2.4.10
  * Last update: 27.07.2017
  *
  * @author kaskar2008
@@ -314,6 +314,10 @@ export class BaseModel {
     var credentials = params.credentials
     var check = params.check || 'status'
     var result = (goodCallback, badCallback, onEnd, onError) => {
+      let triggered = {
+        onEnd: false,
+        onError: false
+      }
       fetch(uri, {
         headers: new Headers(Object.assign({},headers)),
         credentials,
@@ -321,10 +325,21 @@ export class BaseModel {
         mode,
         body: data
       }).then((response) => {
-        if (this.interceptor) this.interceptor(response)
-        if (onEnd) onEnd(response)
+        if (this.interceptor) {
+          let is_continue = this.interceptor(response)
+          if (!is_continue) {
+            return false
+          }
+        }
+        if (onEnd && !triggered.onEnd) {
+          onEnd(response)
+          triggered.onEnd = true
+        }
         if (!response.ok) {
-          if (onError) onError(response)
+          if (onError && !triggered.onError) {
+            onError(response)
+            triggered.onError = true
+          }
           return
         }
         return response.json().then((json) => {
@@ -335,9 +350,14 @@ export class BaseModel {
           }
         })
       }).catch((error) => {
-        if (this.interceptor) this.interceptor(error)
-        if (onEnd) onEnd()
-        if (onError) onError(error)
+        if (onEnd && !triggered.onEnd) {
+          onEnd()
+          triggered.onEnd = true
+        }
+        if (onError && !triggered.onError) {
+          onError(error)
+          triggered.onError = true
+        }
       })
       return this
     }
