@@ -1,6 +1,6 @@
 /**
- * BaseModel v2.4.10
- * Last update: 27.07.2017
+ * BaseModel v3.0.0
+ * Last update: 16.08.2017
  *
  * @author kaskar2008
  */
@@ -60,6 +60,13 @@
 
 import { fromDot, pascalize } from './addons.js'
 
+const DEFAULTS = {
+  CONTEXT: 'default',
+  IS_CAMELED: false,
+  IS_JSON_RESPONSE: true,
+  QUERY_METHOD: 'GET'
+}
+
 export class BaseModel {
 
   /**
@@ -76,7 +83,6 @@ export class BaseModel {
     this.load(this.default_context, data)
     this.processors = {}
     this.addFieldProcessorsBulk({
-      'nullable': value => !value ? null : value,
       'int': value => !value ? 0 : (parseInt(value) ? parseInt(value) : 0),
       'string': value => (typeof value) == 'string' ? value : (!value ? '' : ''+value),
       'array': value => Array.isArray(value) ? value : [],
@@ -229,16 +235,16 @@ export class BaseModel {
    * @param  {Boolean} is_cameled [Data is cameled]
    * @return {BaseModel}
    */
-  load (group, data, is_cameled = false) {
+  load (group, data, is_cameled) {
     if (this._loaded[group]) {
       if (this._loaded[group].data) {
         this._loaded[group].data = Object.assign(this._loaded[group].data || {}, data)
         this._loaded[group].is_cameled = is_cameled
       } else {
-        this._loaded[group] = {data: data, is_cameled: is_cameled}
+        this._loaded[group] = {data, is_cameled}
       }
     } else {
-      this._loaded[group] = {data: data, is_cameled: is_cameled}
+      this._loaded[group] = {data, is_cameled}
     }
     return this
   }
@@ -278,6 +284,10 @@ export class BaseModel {
       return false
     }
     this._fields[context] = names || {}
+    this._loaded[context] = {
+      data: {},
+      is_cameled: DEFAULTS.IS_CAMELED
+    }
     return this
   }
 
@@ -292,6 +302,12 @@ export class BaseModel {
       return
     }
     Object.assign(this._fields, data)
+    for (let key in data) {
+      this._loaded[key] = {
+        data: {},
+        is_cameled: DEFAULTS.IS_CAMELED
+      }
+    }
     return this
   }
 
@@ -306,60 +322,53 @@ export class BaseModel {
    */
   generateQuery (params) {
     var uri = params.uri
-    var method = params.method || 'GET'
+    var method = params.method || DEFAULTS.QUERY_METHOD
     var model = params.model || null
     var data = model ? JSON.stringify(this.getFields(model)) : (params.data || null)
     var mode = params.mode
     var headers = params.headers || {}
     var credentials = params.credentials
     var check = params.check || 'status'
-    var result = (goodCallback, badCallback, onEnd, onError) => {
-      let triggered = {
-        onEnd: false,
-        onError: false
-      }
-      fetch(uri, {
-        headers: new Headers(Object.assign({},headers)),
-        credentials,
-        method,
-        mode,
-        body: data
-      }).then((response) => {
-        if (this.interceptor) {
-          let is_continue = this.interceptor(response)
-          if (!is_continue) {
-            return false
+    var is_json = (params.json === true || params.json === false) ? params.json : DEFAULTS.IS_JSON_RESPONSE
+    var result = () => {
+      return new Promise((resolve, reject) => {
+        fetch(uri, {
+          headers: new Headers(Object.assign({},headers)),
+          credentials,
+          method,
+          mode,
+          body: data
+        }).then((response) => {
+          if (this.interceptor) {
+            let is_continue = this.interceptor(response)
+            if (!is_continue) {
+              reject()
+            }
           }
-        }
-        if (onEnd && !triggered.onEnd) {
-          onEnd(response)
-          triggered.onEnd = true
-        }
-        if (!response.ok) {
-          if (onError && !triggered.onError) {
-            onError(response)
-            triggered.onError = true
+          if (!response.ok) {
+            reject()
           }
-          return
-        }
-        return response.json().then((json) => {
-          if (!json[check]) {
-            if (badCallback) badCallback(json)
+          if (is_json) {
+            response.json().then((json) => {
+              resolve(json)
+            }).catch((error) => {
+              let err = new Error('Json parse error')
+              err.type = 'json'
+              reject(err)
+            })
           } else {
-            goodCallback(json)
+            response.text().then((text) => {
+              resolve(text)
+            }).catch((error) => {
+              let err = new Error('Text retrieve error')
+              err.type = 'text'
+              reject(err)
+            })
           }
+        }).catch((error) => {
+          reject(error)
         })
-      }).catch((error) => {
-        if (onEnd && !triggered.onEnd) {
-          onEnd()
-          triggered.onEnd = true
-        }
-        if (onError && !triggered.onError) {
-          onError(error)
-          triggered.onError = true
-        }
       })
-      return this
     }
     return result
   }
