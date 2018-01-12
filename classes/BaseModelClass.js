@@ -58,7 +58,47 @@
 // Desc: check either send this field or not
 // ***********************************************************************
 
-import { fromDot, pascalize } from './addons.js'
+function getQueryString (params) {
+  return Object
+  .keys(params)
+  .map(k => {
+    if (Array.isArray(params[k])) {
+      return params[k]
+        .map(val => `${encodeURIComponent(k)}[]=${encodeURIComponent(val)}`)
+        .join('&')
+    }
+
+    return `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`
+  })
+  .join('&')
+}
+
+function camelize (string) {
+  if (_isNumerical(string)) {
+    return string
+  }
+  string = string.replace(/[\-_\s]+(.)?/g, function(match, chr) {
+    return chr ? chr.toUpperCase() : ''
+  })
+  // Ensure 1st char is always lowercase
+  return string.substr(0, 1).toLowerCase() + string.substr(1)
+};
+
+function pascalize (string) {
+  var camelized = camelize(string)
+  // Ensure 1st char is always uppercase
+  return camelized.substr(0, 1).toUpperCase() + camelized.substr(1)
+};
+
+function fromDot (obj, p) {
+  if (!p) return obj
+  return p.split('.').reduce((o,i) => typeof o === 'object'? o[i] : o, obj)
+}
+
+function  _isNumerical (obj) {
+  obj = obj - 0;
+  return obj === obj
+}
 
 const DEFAULTS = {
   CONTEXT: 'default',
@@ -324,12 +364,19 @@ export class BaseModel {
     var uri = params.uri
     var method = params.method || DEFAULTS.QUERY_METHOD
     var model = params.model || null
-    var data = model ? JSON.stringify(this.getFields(model)) : (params.data || null)
+    var data = model ? this.getFields(model) : (params.data || null)
     var mode = params.mode
     var headers = params.headers || {}
     var credentials = params.credentials
     var check = params.check || 'status'
     var is_json = (params.json === true || params.json === false) ? params.json : DEFAULTS.IS_JSON_RESPONSE
+
+    if (method.toUpperCase() == 'GET' && data) {
+      uri = uri + (!~uri.indexOf('?')?'?':'') + getQueryString(data)
+    } else if (method.toUpperCase() != 'GET') {
+      data = JSON.stringify(data)
+    }
+
     var result = () => {
       return new Promise((resolve, reject) => {
         fetch(uri, {
@@ -449,7 +496,7 @@ export class BaseModel {
         var value = null
         var external_value = null
         var is_external = false
-        
+
         // has condition:
         let condition = el.match(/if\((.+)\)/i)
         let condition_result = true
